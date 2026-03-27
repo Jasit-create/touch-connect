@@ -3,36 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pixel Dota Style</title>
+    <title>Pixel Drag & Draw</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; background: #050505; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; }
-        
-        /* Боковая панель - всегда на месте */
+        body { margin: 0; overflow: hidden; background: #050505; color: white; font-family: sans-serif; display: flex; }
         #ui {
             width: 70px; height: 100vh; background: #111; display: flex; flex-direction: column;
             align-items: center; padding: 15px 0; gap: 10px; border-right: 1px solid #333; z-index: 100;
         }
-
         .color-btn {
             width: 38px; height: 38px; border-radius: 10px; border: 2px solid transparent;
-            cursor: pointer; transition: 0.1s; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            cursor: pointer; transition: 0.1s;
         }
         .color-btn.active { border-color: white; transform: scale(1.1); box-shadow: 0 0 10px white; }
-        
         .tool-btn { 
             width: 42px; height: 42px; background: #222; border: 1px solid #444; border-radius: 10px; 
             cursor: pointer; font-size: 20px; color: white; display: flex; align-items: center; justify-content: center;
         }
-        .tool-btn:hover { background: #333; }
         #eraser.active { background: #ff2d55; border-color: white; }
-
-        canvas { position: absolute; left: 70px; top: 0; touch-action: none; cursor: crosshair; z-index: 1; }
-        
+        canvas { position: absolute; left: 70px; top: 0; touch-action: none; cursor: grab; z-index: 1; }
+        canvas:active { cursor: grabbing; }
         #room-info { 
             position: fixed; top: 15px; right: 20px; font-size: 11px; color: #00fbff; 
             background: rgba(0,0,0,0.8); padding: 6px 12px; border-radius: 20px; 
-            z-index: 100; border: 1px solid #00fbff; font-weight: bold; letter-spacing: 1px;
+            z-index: 100; border: 1px solid #00fbff;
         }
     </style>
 </head>
@@ -43,7 +37,6 @@
     <div class="color-btn" style="background: #ff69b4;" data-color="#ff69b4"></div>
     <div class="color-btn" style="background: #00fbff;" data-color="#00fbff"></div>
     <div class="color-btn" style="background: #beff00;" data-color="#beff00"></div>
-    <div class="color-btn" style="background: #ffcf00;" data-color="#ffcf00"></div>
     <div class="color-btn" style="background: #ffffff;" data-color="#ffffff"></div>
     <button id="eraser" class="tool-btn">🧹</button>
     <div style="flex-grow: 1;"></div>
@@ -70,7 +63,7 @@
     let currentColor = '#ff2d55';
     let isEraser = false;
 
-    // MQTT Setup
+    // MQTT
     const client = mqtt.connect('wss://test.mosquitto.org:8081');
     const topic = `pixel_battle/room/${roomName}`;
 
@@ -97,18 +90,16 @@
         ctx.translate(offsetX, offsetY);
         ctx.scale(scale, scale);
 
-        // Рисуем сетку
+        // Сетка
         ctx.beginPath();
         ctx.strokeStyle = '#1a1a1a';
         ctx.lineWidth = 0.5 / scale;
-        const limit = 5000;
-        for (let i = -limit; i <= limit; i += cellSize) {
-            ctx.moveTo(i, -limit); ctx.lineTo(i, limit);
-            ctx.moveTo(-limit, i); ctx.lineTo(limit, i);
+        for (let i = -2000; i <= 2000; i += cellSize) {
+            ctx.moveTo(i, -2000); ctx.lineTo(i, 2000);
+            ctx.moveTo(-2000, i); ctx.lineTo(2000, i);
         }
         ctx.stroke();
 
-        // Рисуем пиксели
         for (let key in pixels) {
             const [px, py] = key.split(',').map(Number);
             ctx.fillStyle = pixels[key];
@@ -117,85 +108,95 @@
         ctx.restore();
     }
 
-    // --- Перемещение в стиле Dota (Camera Pan) ---
-    let mousePos = { x: 0, y: 0 };
-    window.addEventListener('mousemove', (e) => {
-        mousePos.x = e.clientX;
-        mousePos.y = e.clientY;
-    });
+    // --- Логика перетаскивания и рисования ---
+    let isMouseDown = false;
+    let hasDragged = false;
+    let startX, startY;
 
-    function updateCamera() {
-        const panSpeed = 10;
-        const edgeSize = 30; // Зона активации у края (в пикселях)
-
-        if (mousePos.x > window.innerWidth - edgeSize) offsetX -= panSpeed;
-        if (mousePos.x < 70 + edgeSize) offsetX += panSpeed;
-        if (mousePos.y > window.innerHeight - edgeSize) offsetY -= panSpeed;
-        if (mousePos.y < edgeSize) offsetY += panSpeed;
-
-        draw();
-        requestAnimationFrame(updateCamera);
-    }
-    updateCamera(); // Запуск цикла камеры
-
-    // Рисование
     canvas.addEventListener('pointerdown', (e) => {
-        const rect = canvas.getBoundingClientRect();
-        const worldX = Math.floor(((e.clientX - rect.left) - offsetX) / scale / cellSize) * cellSize;
-        const worldY = Math.floor(((e.clientY - rect.top) - offsetY) / scale / cellSize) * cellSize;
-        
-        const drawColor = isEraser ? 'erase' : currentColor;
-        client.publish(topic, JSON.stringify({ x: worldX, y: worldY, color: drawColor }));
-        
-        if (isEraser) delete pixels[`${worldX},${worldY}`];
-        else pixels[`${worldX},${worldY}`] = drawColor;
-        draw();
+        isMouseDown = true;
+        hasDragged = false;
+        startX = e.clientX;
+        startY = e.clientY;
     });
 
-    // Зум только на канвас
+    window.addEventListener('pointermove', (e) => {
+        if (!isMouseDown) return;
+        
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+
+        // Если сдвинули больше чем на 5 пикселей - считаем это движением камеры
+        if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+            hasDragged = true;
+            offsetX += dx;
+            offsetY += dy;
+            startX = e.clientX;
+            startY = e.clientY;
+            draw();
+        }
+    });
+
+    window.addEventListener('pointerup', (e) => {
+        if (isMouseDown && !hasDragged) {
+            // Если не двигали экран, значит это был клик (ставим пиксель)
+            const rect = canvas.getBoundingClientRect();
+            const worldX = Math.floor(((e.clientX - rect.left) - offsetX) / scale / cellSize) * cellSize;
+            const worldY = Math.floor(((e.clientY - rect.top) - offsetY) / scale / cellSize) * cellSize;
+            
+            const drawColor = isEraser ? 'erase' : currentColor;
+            client.publish(topic, JSON.stringify({ x: worldX, y: worldY, color: drawColor }));
+            
+            if (isEraser) delete pixels[`${worldX},${worldY}`];
+            else pixels[`${worldX},${worldY}`] = drawColor;
+            draw();
+        }
+        isMouseDown = false;
+    });
+
     canvas.addEventListener('wheel', (e) => {
         e.preventDefault();
         const oldScale = scale;
-        scale = Math.min(Math.max(0.1, scale + (e.deltaY > 0 ? -0.1 : 0.1)), 10);
+        scale = Math.min(Math.max(0.2, scale + (e.deltaY > 0 ? -0.1 : 0.1)), 5);
         const rect = canvas.getBoundingClientRect();
         offsetX -= (e.clientX - rect.left - offsetX) * (scale / oldScale - 1);
         offsetY -= (e.clientY - rect.top - offsetY) * (scale / oldScale - 1);
         draw();
     }, { passive: false });
 
-    // UI Кнопки
+    // Кнопки палитры
     document.querySelectorAll('.color-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
+        btn.onclick = () => {
             isEraser = false;
             document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
             eraserBtn.classList.remove('active');
             btn.classList.add('active');
             currentColor = btn.dataset.color;
-        });
+        };
     });
 
-    document.getElementById('eraser').onclick = function() {
+    const eraserBtn = document.getElementById('eraser');
+    eraserBtn.onclick = () => {
         isEraser = true;
         document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
-        this.classList.add('active');
+        eraserBtn.classList.add('active');
     };
 
     document.getElementById('clear').onclick = () => {
         if(confirm('Очистить всё?')) {
             client.publish(topic, JSON.stringify({ type: 'clear' }));
-            pixels = {};
-            draw();
+            pixels = {}; draw();
         }
     };
 
     document.getElementById('save').onclick = () => {
         const link = document.createElement('a');
-        link.download = 'our_pixel_art.png';
+        link.download = 'pixel_art.png';
         link.href = canvas.toDataURL();
         link.click();
     };
 
-    canvas.addEventListener('contextmenu', e => e.preventDefault());
+    canvas.oncontextmenu = (e) => e.preventDefault();
 </script>
 </body>
 </html>
