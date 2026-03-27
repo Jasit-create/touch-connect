@@ -3,31 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pixel Drag & Draw</title>
+    <title>Private Pixel Art</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
     <style>
         body { margin: 0; overflow: hidden; background: #050505; color: white; font-family: sans-serif; display: flex; }
+        
         #ui {
-            width: 70px; height: 100vh; background: #111; display: flex; flex-direction: column;
-            align-items: center; padding: 15px 0; gap: 10px; border-right: 1px solid #333; z-index: 100;
+            width: 80px; height: 100vh; background: #111; display: flex; flex-direction: column;
+            align-items: center; padding: 15px 0; gap: 8px; border-right: 1px solid #222; z-index: 100;
+            overflow-y: auto; scrollbar-width: none;
         }
+        #ui::-webkit-scrollbar { display: none; }
+
         .color-btn {
-            width: 38px; height: 38px; border-radius: 10px; border: 2px solid transparent;
-            cursor: pointer; transition: 0.1s;
+            width: 42px; height: 42px; border-radius: 8px; border: none;
+            cursor: pointer; transition: transform 0.1s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            flex-shrink: 0;
         }
-        .color-btn.active { border-color: white; transform: scale(1.1); box-shadow: 0 0 10px white; }
+        .color-btn:active { transform: scale(0.85); }
+        .color-btn.active { transform: scale(1.1); border: 2px solid white; border-radius: 12px; }
+
         .tool-btn { 
-            width: 42px; height: 42px; background: #222; border: 1px solid #444; border-radius: 10px; 
-            cursor: pointer; font-size: 20px; color: white; display: flex; align-items: center; justify-content: center;
+            width: 45px; height: 45px; background: #222; border: 1px solid #333; border-radius: 10px; 
+            cursor: pointer; font-size: 20px; transition: 0.2s; margin-top: 10px;
         }
-        #eraser.active { background: #ff2d55; border-color: white; }
-        canvas { position: absolute; left: 70px; top: 0; touch-action: none; cursor: grab; z-index: 1; }
-        canvas:active { cursor: grabbing; }
+        #eraser.active { background: #ff2d55; border-color: white; transform: scale(1.1); }
+
+        canvas { position: absolute; left: 80px; top: 0; touch-action: none; cursor: grab; z-index: 1; }
+        
         #room-info { 
-            position: fixed; top: 15px; right: 20px; font-size: 11px; color: #00fbff; 
-            background: rgba(0,0,0,0.8); padding: 6px 12px; border-radius: 20px; 
-            z-index: 100; border: 1px solid #00fbff;
+            position: fixed; top: 15px; right: 20px; font-size: 11px; 
+            background: rgba(0,0,0,0.95); padding: 8px 16px; border-radius: 30px; 
+            z-index: 100; border: 1px solid #222; display: flex; gap: 10px; align-items: center;
         }
+        #online-count { color: #00fbff; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -35,28 +44,53 @@
 <div id="ui">
     <div class="color-btn active" style="background: #ff2d55;" data-color="#ff2d55"></div>
     <div class="color-btn" style="background: #ff69b4;" data-color="#ff69b4"></div>
+    <div class="color-btn" style="background: #e02dff;" data-color="#e02dff"></div>
+    <div class="color-btn" style="background: #9d2dff;" data-color="#9d2dff"></div>
     <div class="color-btn" style="background: #00fbff;" data-color="#00fbff"></div>
+    <div class="color-btn" style="background: #007bff;" data-color="#007bff"></div>
+    <div class="color-btn" style="background: #2dff88;" data-color="#2dff88"></div>
     <div class="color-btn" style="background: #beff00;" data-color="#beff00"></div>
+    <div class="color-btn" style="background: #ffff00;" data-color="#ffff00"></div>
+    <div class="color-btn" style="background: #ffcf00;" data-color="#ffcf00"></div>
+    <div class="color-btn" style="background: #ff882d;" data-color="#ff882d"></div>
+    <div class="color-btn" style="background: #ff4d2d;" data-color="#ff4d2d"></div>
     <div class="color-btn" style="background: #ffffff;" data-color="#ffffff"></div>
+    <div class="color-btn" style="background: #aaaaaa;" data-color="#aaaaaa"></div>
+    <div class="color-btn" style="background: #555555;" data-color="#555555"></div>
+    <div class="color-btn" style="background: #333333;" data-color="#333333"></div>
+    <div class="color-btn" style="background: #db7093;" data-color="#db7093"></div>
+    <div class="color-btn" style="background: #afeeee;" data-color="#afeeee"></div>
+    <div class="color-btn" style="background: #98fb98;" data-color="#98fb98"></div>
+    <div class="color-btn" style="background: #ffd700;" data-color="#ffd700"></div>
+    
     <button id="eraser" class="tool-btn">🧹</button>
-    <div style="flex-grow: 1;"></div>
-    <button id="clear" class="tool-btn">🗑️</button>
-    <button id="save" class="tool-btn">💾</button>
 </div>
 
-<div id="room-info">ROOM: LOADING...</div>
+<div id="room-info">
+    <span id="room-id-display">SECRET ROOM</span>
+    <span>ONLINE: <span id="online-count">1</span></span>
+</div>
 <canvas id="canvas"></canvas>
 
 <script>
+    // 1. ГЕНЕРАЦИЯ УНИКАЛЬНОЙ КОМНАТЫ
     const urlParams = new URLSearchParams(window.location.search);
-    const roomName = urlParams.get('room') || 'secret_battle';
-    document.getElementById('room-info').innerText = `ROOM: ${roomName.toUpperCase()}`;
+    let roomID = urlParams.get('id');
+
+    if (!roomID) {
+        // Если ID нет, создаем его и перезагружаем страницу с ним
+        roomID = Math.random().toString(36).substr(2, 12);
+        window.history.replaceState(null, null, "?id=" + roomID);
+    }
+    document.getElementById('room-id-display').innerText = "ID: " + roomID.toUpperCase();
 
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
+    const onlineDisplay = document.getElementById('online-count');
     
     let pixels = {}; 
     const cellSize = 20;
+    const canvasLimit = 2000;
     let scale = 1.0;
     let offsetX = 0;
     let offsetY = 0;
@@ -64,20 +98,46 @@
     let isEraser = false;
 
     // MQTT
+    const myId = Math.random().toString(36).substr(2, 9);
     const client = mqtt.connect('wss://test.mosquitto.org:8081');
-    const topic = `pixel_battle/room/${roomName}`;
+    const mainTopic = `pixel_private_${roomID}`;
+    const presenceTopic = `${mainTopic}/presence`;
 
-    client.on('connect', () => client.subscribe(topic));
-    client.on('message', (t, p) => {
-        const m = JSON.parse(p.toString());
-        if (m.type === 'clear') pixels = {};
-        else if (m.color === 'erase') delete pixels[`${m.x},${m.y}`];
-        else pixels[`${m.x},${m.y}`] = m.color;
-        draw();
+    let onlineUsers = {};
+
+    client.on('connect', () => {
+        client.subscribe(mainTopic);
+        client.subscribe(presenceTopic);
+        setInterval(() => client.publish(presenceTopic, JSON.stringify({ id: myId, t: Date.now() })), 4000);
     });
 
+    client.on('message', (topic, payload) => {
+        const m = JSON.parse(payload.toString());
+        if (topic === presenceTopic) {
+            onlineUsers[m.id] = Date.now();
+            updateOnline();
+        } else {
+            // Рисуем только если пришло от другого
+            if (m.sender !== myId) {
+                if (m.color === 'erase') delete pixels[`${m.x},${m.y}`];
+                else pixels[`${m.x},${m.y}`] = m.color;
+                draw();
+            }
+        }
+    });
+
+    function updateOnline() {
+        const now = Date.now();
+        let count = 0;
+        for (let id in onlineUsers) {
+            if (now - onlineUsers[id] < 10000) count++;
+            else delete onlineUsers[id];
+        }
+        onlineDisplay.innerText = count;
+    }
+
     function resize() {
-        canvas.width = window.innerWidth - 70;
+        canvas.width = window.innerWidth - 80;
         canvas.height = window.innerHeight;
         draw();
     }
@@ -90,13 +150,12 @@
         ctx.translate(offsetX, offsetY);
         ctx.scale(scale, scale);
 
-        // Сетка
         ctx.beginPath();
         ctx.strokeStyle = '#1a1a1a';
         ctx.lineWidth = 0.5 / scale;
-        for (let i = -2000; i <= 2000; i += cellSize) {
-            ctx.moveTo(i, -2000); ctx.lineTo(i, 2000);
-            ctx.moveTo(-2000, i); ctx.lineTo(2000, i);
+        for (let i = 0; i <= canvasLimit; i += cellSize) {
+            ctx.moveTo(i, 0); ctx.lineTo(i, canvasLimit);
+            ctx.moveTo(0, i); ctx.lineTo(canvasLimit, i);
         }
         ctx.stroke();
 
@@ -108,7 +167,6 @@
         ctx.restore();
     }
 
-    // --- Логика перетаскивания и рисования ---
     let isMouseDown = false;
     let hasDragged = false;
     let startX, startY;
@@ -122,11 +180,8 @@
 
     window.addEventListener('pointermove', (e) => {
         if (!isMouseDown) return;
-        
         const dx = e.clientX - startX;
         const dy = e.clientY - startY;
-
-        // Если сдвинули больше чем на 5 пикселей - считаем это движением камеры
         if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
             hasDragged = true;
             offsetX += dx;
@@ -139,17 +194,20 @@
 
     window.addEventListener('pointerup', (e) => {
         if (isMouseDown && !hasDragged) {
-            // Если не двигали экран, значит это был клик (ставим пиксель)
             const rect = canvas.getBoundingClientRect();
             const worldX = Math.floor(((e.clientX - rect.left) - offsetX) / scale / cellSize) * cellSize;
             const worldY = Math.floor(((e.clientY - rect.top) - offsetY) / scale / cellSize) * cellSize;
             
-            const drawColor = isEraser ? 'erase' : currentColor;
-            client.publish(topic, JSON.stringify({ x: worldX, y: worldY, color: drawColor }));
-            
-            if (isEraser) delete pixels[`${worldX},${worldY}`];
-            else pixels[`${worldX},${worldY}`] = drawColor;
-            draw();
+            if (worldX >= 0 && worldX < canvasLimit && worldY >= 0 && worldY < canvasLimit) {
+                const drawColor = isEraser ? 'erase' : currentColor;
+                
+                // Отправляем с пометкой отправителя
+                client.publish(mainTopic, JSON.stringify({ x: worldX, y: worldY, color: drawColor, sender: myId }));
+                
+                if (isEraser) delete pixels[`${worldX},${worldY}`];
+                else pixels[`${worldX},${worldY}`] = drawColor;
+                draw();
+            }
         }
         isMouseDown = false;
     });
@@ -157,14 +215,13 @@
     canvas.addEventListener('wheel', (e) => {
         e.preventDefault();
         const oldScale = scale;
-        scale = Math.min(Math.max(0.2, scale + (e.deltaY > 0 ? -0.1 : 0.1)), 5);
+        scale = Math.min(Math.max(0.15, scale + (e.deltaY > 0 ? -0.1 : 0.1)), 6);
         const rect = canvas.getBoundingClientRect();
         offsetX -= (e.clientX - rect.left - offsetX) * (scale / oldScale - 1);
         offsetY -= (e.clientY - rect.top - offsetY) * (scale / oldScale - 1);
         draw();
     }, { passive: false });
 
-    // Кнопки палитры
     document.querySelectorAll('.color-btn').forEach(btn => {
         btn.onclick = () => {
             isEraser = false;
@@ -180,20 +237,6 @@
         isEraser = true;
         document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
         eraserBtn.classList.add('active');
-    };
-
-    document.getElementById('clear').onclick = () => {
-        if(confirm('Очистить всё?')) {
-            client.publish(topic, JSON.stringify({ type: 'clear' }));
-            pixels = {}; draw();
-        }
-    };
-
-    document.getElementById('save').onclick = () => {
-        const link = document.createElement('a');
-        link.download = 'pixel_art.png';
-        link.href = canvas.toDataURL();
-        link.click();
     };
 
     canvas.oncontextmenu = (e) => e.preventDefault();
