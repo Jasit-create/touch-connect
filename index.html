@@ -1,1 +1,71 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Touch Connection</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #0a0a0a; touch-action: none; font-family: sans-serif; }
+        .tap {
+            position: absolute; width: 60px; height: 60px;
+            margin: -30px 0 0 -30px; border-radius: 50%;
+            pointer-events: none; animation: pulse 0.8s ease-out forwards;
+            box-shadow: 0 0 20px currentColor;
+        }
+        @keyframes pulse {
+            0% { transform: scale(0.3); opacity: 1; border: 4px solid currentColor; }
+            100% { transform: scale(2.5); opacity: 0; border: 1px solid currentColor; }
+        }
+        #status { position: fixed; top: 10px; width: 100%; text-align: center; color: #444; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; }
+    </style>
+</head>
+<body>
+    <div id="status">соединение...</div>
+    <script>
+        // Уникальный ID комнаты, чтобы никто не мешал
+        const room = "touch_secret_room_777"; 
+        const client = mqtt.connect('wss://test.mosquitto.org:8081');
 
+        client.on('connect', () => {
+            client.subscribe(room);
+            document.getElementById('status').innerText = "онлайн";
+        });
+
+        function createEffect(x, y, color, isRemote = false) {
+            const div = document.createElement('div');
+            div.className = 'tap';
+            div.style.left = x + 'px';
+            div.style.top = y + 'px';
+            div.style.color = color;
+            document.body.appendChild(div);
+            
+            // Вибрация телефона при получении касания
+            if (isRemote && navigator.vibrate) {
+                navigator.vibrate(50); 
+            }
+            
+            setTimeout(() => div.remove(), 800);
+        }
+
+        window.addEventListener('pointerdown', (e) => {
+            const data = {
+                x: e.clientX / window.innerWidth,
+                y: e.clientY / window.innerHeight,
+                id: client.options.clientId
+            };
+            client.publish(room, JSON.stringify(data));
+            createEffect(e.clientX, e.clientY, '#00fbff'); // Твой цвет — неон
+        });
+
+        client.on('message', (topic, payload) => {
+            const m = JSON.parse(payload.toString());
+            if (m.id !== client.options.clientId) {
+                const x = m.x * window.innerWidth;
+                const y = m.y * window.innerHeight;
+                createEffect(x, y, '#ff2d55', true); // Цвет девушки — розовый
+            }
+        });
+    </script>
+</body>
+</html>
